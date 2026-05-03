@@ -59,9 +59,21 @@ class ModelThresholdIn(BaseModel):
     main_bearing_temp_max: float = 60.0
     vibration_max_mm_s: float = 4.5
     oil_pressure_min: float = 3.0
+    service_interval_hours: float = 4000.0
 
 
 class ModelThresholdOut(ModelThresholdIn):
     id: int
+
+    model_config = {"from_attributes": True}
+
+
+class TurbineStatusOut(BaseModel):
+    turbine_id: str
+    operating_hours: float
+    last_service_hours: float
+    hours_since_service: float
+    service_interval_hours: float
+    service_due: bool
 
     model_config = {"from_attributes": True}

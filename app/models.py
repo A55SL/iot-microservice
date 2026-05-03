@@ -56,3 +56,15 @@ class ModelThreshold(Base):
     main_bearing_temp_max = Column(Float, default=60.0)
     vibration_max_mm_s = Column(Float, default=4.5)
     oil_pressure_min = Column(Float, default=3.0)
+    service_interval_hours = Column(Float, default=4000.0)
+
+
+class TurbineStatus(Base):
+    __tablename__ = "turbine_status"
+
+    id = Column(Integer, primary_key=True, index=True)
+    turbine_id = Column(String(100), nullable=False, unique=True, index=True)
+    operating_hours = Column(Float, default=0.0)
+    last_service_hours = Column(Float, default=0.0)
+    last_reading_time = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
