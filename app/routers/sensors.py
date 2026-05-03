@@ -5,47 +5,51 @@ from app.database import get_db
 from app.auth import require_api_key
 
 router = APIRouter(
-    prefix="/sensors",
-    tags=["Sensors"],
+    prefix="/api/turbines",
+    tags=["Turbines"],
     dependencies=[Depends(require_api_key)],
 )
 
 
-@router.post("/readings", response_model=schemas.SensorReadingWithAlert, status_code=201)
-def create_reading(payload: schemas.SensorReadingCreate, db: Session = Depends(get_db)):
-    """Receive a sensor reading, check thresholds, save and return result."""
-    reading = models.SensorReading(**payload.model_dump())
+@router.post("/data", status_code=201)
+def receive_turbine_data(payload: schemas.TurbineDataIn, db: Session = Depends(get_db)):
+    """Receive telemetry from a wind turbine, store it, and evaluate thresholds."""
+    reading = models.TurbineReading(**payload.model_dump())
     db.add(reading)
     db.commit()
     db.refresh(reading)
 
-    alert = logic.evaluate_reading(db, reading)
+    alerts = logic.evaluate_reading(db, reading)
 
-    return schemas.SensorReadingWithAlert(
-        **schemas.SensorReadingResponse.model_validate(reading).model_dump(),
-        alert=schemas.AlertResponse.model_validate(alert) if alert else None,
-    )
-
-
-@router.get("/readings", response_model=list[schemas.SensorReadingResponse])
-def get_readings(db: Session = Depends(get_db)):
-    """Return all sensor readings."""
-    return db.query(models.SensorReading).order_by(models.SensorReading.timestamp.desc()).all()
+    return {
+        "status": "received",
+        "reading_id": reading.id,
+        "alerts_triggered": len(alerts),
+    }
 
 
-@router.post("/threshold", response_model=schemas.ThresholdConfigResponse, status_code=201)
-def set_threshold(payload: schemas.ThresholdConfigCreate, db: Session = Depends(get_db)):
-    """Create or update threshold config for a device."""
+@router.get("/readings", response_model=list[schemas.TurbineDataOut])
+def get_readings(turbine_id: str = None, db: Session = Depends(get_db)):
+    """Return stored readings, optionally filtered by turbine_id."""
+    query = db.query(models.TurbineReading).order_by(models.TurbineReading.timestamp.desc())
+    if turbine_id:
+        query = query.filter(models.TurbineReading.turbine_id == turbine_id)
+    return query.limit(100).all()
+
+
+@router.post("/thresholds", response_model=schemas.ModelThresholdOut, status_code=201)
+def set_model_threshold(payload: schemas.ModelThresholdIn, db: Session = Depends(get_db)):
+    """Set thresholds for a specific turbine model."""
     config = (
-        db.query(models.ThresholdConfig)
-        .filter(models.ThresholdConfig.device_id == payload.device_id)
+        db.query(models.ModelThreshold)
+        .filter(models.ModelThreshold.turbine_model == payload.turbine_model)
         .first()
     )
     if config:
-        config.warning_threshold = payload.warning_threshold
-        config.critical_threshold = payload.critical_threshold
+        for key, val in payload.model_dump().items():
+            setattr(config, key, val)
     else:
-        config = models.ThresholdConfig(**payload.model_dump())
+        config = models.ModelThreshold(**payload.model_dump())
         db.add(config)
 
     db.commit()

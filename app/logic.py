@@ -1,50 +1,91 @@
+import logging
 from sqlalchemy.orm import Session
 from app import models
 
-DEFAULT_WARNING_THRESHOLD = 75.0
-DEFAULT_CRITICAL_THRESHOLD = 90.0
+logger = logging.getLogger("predictive_maintenance")
+
+# Default thresholds for Vestas V90-2MW
+DEFAULTS = {
+    "generator_temp_max": 80.0,
+    "gearbox_temp_max": 70.0,
+    "main_bearing_temp_max": 60.0,
+    "vibration_max_mm_s": 4.5,
+    "oil_pressure_min": 3.0,
+}
 
 
-def get_thresholds(db: Session, device_id: str) -> tuple[float, float]:
-    """Look up device-specific thresholds, or use defaults."""
+def get_model_from_id(turbine_id: str) -> str:
+    """Extract model name from turbine ID. E.g. 'VES-V90-001' → 'VES-V90'"""
+    parts = turbine_id.rsplit("-", 1)
+    return parts[0] if len(parts) > 1 else turbine_id
+
+
+def get_thresholds(db: Session, turbine_id: str) -> dict:
+    """Look up model-specific thresholds, or fall back to defaults."""
+    model = get_model_from_id(turbine_id)
     config = (
-        db.query(models.ThresholdConfig)
-        .filter(models.ThresholdConfig.device_id == device_id)
+        db.query(models.ModelThreshold)
+        .filter(models.ModelThreshold.turbine_model == model)
         .first()
     )
     if config:
-        return config.warning_threshold, config.critical_threshold
-    return DEFAULT_WARNING_THRESHOLD, DEFAULT_CRITICAL_THRESHOLD
+        return {
+            "generator_temp_max": config.generator_temp_max,
+            "gearbox_temp_max": config.gearbox_temp_max,
+            "main_bearing_temp_max": config.main_bearing_temp_max,
+            "vibration_max_mm_s": config.vibration_max_mm_s,
+            "oil_pressure_min": config.oil_pressure_min,
+        }
+    return DEFAULTS.copy()
 
 
-def evaluate_reading(db: Session, reading: models.SensorReading) -> models.Alert | None:
+def evaluate_reading(db: Session, reading: models.TurbineReading) -> list[models.Alert]:
     """
-    Core domain logic:
-    Sensor Value Received → Threshold Check → Alert (if breached)
+    Core domain logic: check all sensor values against model-specific thresholds.
+    Returns a list of alerts (could be multiple per reading).
     """
-    warning_threshold, critical_threshold = get_thresholds(db, reading.device_id)
+    thresholds = get_thresholds(db, reading.turbine_id)
+    alerts = []
 
-    if reading.value >= critical_threshold:
-        severity = "CRITICAL"
-        message = (
-            f"CRITICAL: Device '{reading.device_id}' reported {reading.value} {reading.unit}, "
-            f"exceeding critical threshold of {critical_threshold} {reading.unit}."
-        )
-    elif reading.value >= warning_threshold:
-        severity = "WARNING"
-        message = (
-            f"WARNING: Device '{reading.device_id}' reported {reading.value} {reading.unit}, "
-            f"exceeding warning threshold of {warning_threshold} {reading.unit}."
-        )
-    else:
-        return None
+    checks = [
+        ("generator_temp_c", reading.generator_temp_c, thresholds["generator_temp_max"], "above"),
+        ("gearbox_temp_c", reading.gearbox_temp_c, thresholds["gearbox_temp_max"], "above"),
+        ("main_bearing_temp_c", reading.main_bearing_temp_c, thresholds["main_bearing_temp_max"], "above"),
+        ("main_bearing_vibration_mm_s", reading.main_bearing_vibration_mm_s, thresholds["vibration_max_mm_s"], "above"),
+        ("oil_pressure_bar", reading.oil_pressure_bar, thresholds["oil_pressure_min"], "below"),
+    ]
 
-    alert = models.Alert(
-        reading_id=reading.id,
-        message=message,
-        severity=severity,
-    )
-    db.add(alert)
-    db.commit()
-    db.refresh(alert)
-    return alert
+    for param, value, limit, direction in checks:
+        breached = value > limit if direction == "above" else value < limit
+        if breached:
+            severity = "CRITICAL" if direction == "above" and value > limit * 1.15 else "WARNING"
+            if direction == "below" and value < limit * 0.7:
+                severity = "CRITICAL"
+
+            message = (
+                f"{severity}: Turbine '{reading.turbine_id}' — "
+                f"{param} = {value:.1f} {'exceeds' if direction == 'above' else 'below'} "
+                f"limit {limit:.1f}"
+            )
+
+            alert = models.Alert(
+                reading_id=reading.id,
+                turbine_id=reading.turbine_id,
+                parameter=param,
+                value=value,
+                threshold=limit,
+                severity=severity,
+                message=message,
+            )
+            db.add(alert)
+            alerts.append(alert)
+
+            # Simulate technician notification
+            logger.warning(f"🚨 TECHNICIAN NOTIFIED — {message}")
+
+    if alerts:
+        db.commit()
+        for a in alerts:
+            db.refresh(a)
+
+    return alerts

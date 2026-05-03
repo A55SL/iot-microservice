@@ -1,20 +1,39 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
 
 
-class SensorReadingCreate(BaseModel):
-    device_id: str
-    value: float
-    unit: str = "celsius"
-
-
-class SensorReadingResponse(BaseModel):
-    id: int
-    device_id: str
-    value: float
-    unit: str
+class TurbineDataIn(BaseModel):
+    turbine_id: str
     timestamp: datetime
+    wind_speed_m_s: float
+    rotor_rpm: float
+    power_output_kw: float
+    blade_pitch_deg: float
+    nacelle_yaw_deg: float
+    generator_temp_c: float
+    gearbox_temp_c: float
+    main_bearing_temp_c: float
+    nacelle_temp_c: float
+    ambient_temp_c: float
+    main_bearing_vibration_mm_s: float
+    tower_vibration_mm_s: float
+    oil_pressure_bar: float
+    grid_frequency_hz: float
+    fault_injected: Optional[str] = None
+
+
+class TurbineDataOut(BaseModel):
+    id: int
+    turbine_id: str
+    timestamp: datetime
+    wind_speed_m_s: float
+    power_output_kw: float
+    generator_temp_c: float
+    gearbox_temp_c: float
+    main_bearing_vibration_mm_s: float
+    oil_pressure_bar: float
+    received_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -22,25 +41,27 @@ class SensorReadingResponse(BaseModel):
 class AlertResponse(BaseModel):
     id: int
     reading_id: int
-    message: str
+    turbine_id: str
+    parameter: str
+    value: float
+    threshold: float
     severity: str
+    message: str
     timestamp: datetime
 
     model_config = {"from_attributes": True}
 
 
-class SensorReadingWithAlert(SensorReadingResponse):
-    alert: Optional[AlertResponse] = None
+class ModelThresholdIn(BaseModel):
+    turbine_model: str
+    generator_temp_max: float = 80.0
+    gearbox_temp_max: float = 70.0
+    main_bearing_temp_max: float = 60.0
+    vibration_max_mm_s: float = 4.5
+    oil_pressure_min: float = 3.0
 
 
-class ThresholdConfigCreate(BaseModel):
-    device_id: str
-    warning_threshold: float = Field(default=75.0, ge=0)
-    critical_threshold: float = Field(default=90.0, ge=0)
-
-
-class ThresholdConfigResponse(ThresholdConfigCreate):
+class ModelThresholdOut(ModelThresholdIn):
     id: int
-    updated_at: datetime
 
     model_config = {"from_attributes": True}
