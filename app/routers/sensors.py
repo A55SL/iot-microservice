@@ -2,8 +2,13 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app import models, schemas, logic
 from app.database import get_db
+from app.auth import require_api_key
 
-router = APIRouter(prefix="/sensors", tags=["Sensors"])
+router = APIRouter(
+    prefix="/sensors",
+    tags=["Sensors"],
+    dependencies=[Depends(require_api_key)],
+)
 
 
 @router.post("/readings", response_model=schemas.SensorReadingWithAlert, status_code=201)

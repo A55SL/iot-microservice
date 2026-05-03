@@ -2,8 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import get_db
+from app.auth import require_api_key
 
-router = APIRouter(prefix="/alerts", tags=["Alerts"])
+router = APIRouter(
+    prefix="/alerts",
+    tags=["Alerts"],
+    dependencies=[Depends(require_api_key)],
+)
 
 
 @router.get("", response_model=list[schemas.AlertResponse])
